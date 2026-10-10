@@ -3,6 +3,7 @@ package scanner
 import (
 	"errors"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 )
@@ -64,4 +65,48 @@ func isTrash(name string, patterns []string) bool {
 	}
 
 	return false
+}
+
+// EmptyDirs returns directories under root (root itself excluded) that are
+// empty, or would be empty once the files in removed are gone. Directories in
+// ignoreDirs are never entered or returned. Children come before their parents,
+// so the result can be removed in order with os.Remove.
+func EmptyDirs(root string, ignoreDirs []string, removed []Candidate) ([]string, error) {
+	gone := make(map[string]struct{}, len(removed))
+	for _, c := range removed {
+		gone[c.Path] = struct{}{}
+	}
+
+	var (
+		dirs []string
+		errs []error
+		walk func(dir string) bool
+	)
+
+	walk = func(dir string) bool {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			errs = append(errs, err)
+			return false
+		}
+
+		empty := true
+		for _, e := range entries {
+			p := filepath.Join(dir, e.Name())
+			if _, ok := gone[p]; ok {
+				continue
+			}
+			if e.IsDir() && !slices.Contains(ignoreDirs, e.Name()) && walk(p) {
+				dirs = append(dirs, p)
+				continue
+			}
+			empty = false
+		}
+
+		return empty
+	}
+
+	walk(root)
+
+	return dirs, errors.Join(errs...)
 }

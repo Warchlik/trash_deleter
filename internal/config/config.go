@@ -14,6 +14,8 @@ type Config struct {
 	Patterns   []string
 	IgnoreDirs []string
 	DryRun     bool
+	Verbose    bool
+	EmptyDirs  bool
 }
 
 var defaultPatterns = []string{
@@ -27,8 +29,6 @@ var defaultPatterns = []string{
 var defaultIgnoreDirs = []string{
 	".git",
 	"node_modules",
-	"vendor",
-	"venv", ".venv",
 }
 
 func Parse() Config {
@@ -38,13 +38,13 @@ func Parse() Config {
 		"Directory to scan",
 	)
 
-	extraPatterns := flag.String(
+	extra := flag.String(
 		"patterns",
 		"",
 		"Extra comma-separated file name patterns added to the defaults (glob, e.g. \"*.log,backup_*,notes.bak\")",
 	)
 
-	extraIgnore := flag.String(
+	ignore := flag.String(
 		"ignore",
 		"",
 		"Extra comma-separated directory names to skip, added to the defaults (e.g. \"vendor,dist\")",
@@ -56,10 +56,20 @@ func Parse() Config {
 		"Only list files that would be deleted, do not delete anything",
 	)
 
+	var verbose bool
+	flag.BoolVar(&verbose, "verbose", false, "Print every deleted file and directory")
+	flag.BoolVar(&verbose, "v", false, "Shorthand for -verbose")
+
+	emptyDirs := flag.Bool(
+		"empty-dirs",
+		false,
+		"Also remove empty directories, including ones left empty after deleting files",
+	)
+
 	flag.Parse()
 
-	patternsArr := splitList(*extraPatterns)
-	for _, p := range patternsArr {
+	extraPatterns := splitList(*extra)
+	for _, p := range extraPatterns {
 		if _, err := filepath.Match(p, ""); err != nil {
 			fmt.Fprintf(os.Stderr, "invalid pattern %q: %v\n", p, err)
 			os.Exit(2)
@@ -69,8 +79,10 @@ func Parse() Config {
 	return Config{
 		Root:       *root,
 		DryRun:     *dryRun,
-		Patterns:   slices.Concat(defaultPatterns, patternsArr),
-		IgnoreDirs: slices.Concat(defaultIgnoreDirs, splitList(*extraIgnore)),
+		Verbose:    verbose,
+		EmptyDirs:  *emptyDirs,
+		Patterns:   slices.Concat(defaultPatterns, extraPatterns),
+		IgnoreDirs: slices.Concat(defaultIgnoreDirs, splitList(*ignore)),
 	}
 }
 
