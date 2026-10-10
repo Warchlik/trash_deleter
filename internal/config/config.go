@@ -16,6 +16,8 @@ type Config struct {
 	DryRun     bool
 	Verbose    bool
 	EmptyDirs  bool
+	Trash      bool
+	MaxDepth   int
 }
 
 var defaultPatterns = []string{
@@ -66,6 +68,18 @@ func Parse() Config {
 		"Also remove empty directories, including ones left empty after deleting files",
 	)
 
+	trash := flag.Bool(
+		"trash",
+		false,
+		"Move files and empty directories to the system trash instead of deleting them permanently",
+	)
+
+	maxDepth := flag.Int(
+		"max-depth",
+		0,
+		"Maximum directory depth to scan (1 = only files directly in -path, 0 = unlimited)",
+	)
+
 	flag.Parse()
 
 	extraPatterns := splitList(*extra)
@@ -76,11 +90,18 @@ func Parse() Config {
 		}
 	}
 
+	if *maxDepth < 0 {
+		fmt.Fprintf(os.Stderr, "invalid -max-depth %d: must be 0 (unlimited) or greater\n", *maxDepth)
+		os.Exit(2)
+	}
+
 	return Config{
 		Root:       *root,
 		DryRun:     *dryRun,
 		Verbose:    verbose,
 		EmptyDirs:  *emptyDirs,
+		Trash:      *trash,
+		MaxDepth:   *maxDepth,
 		Patterns:   slices.Concat(defaultPatterns, extraPatterns),
 		IgnoreDirs: slices.Concat(defaultIgnoreDirs, splitList(*ignore)),
 	}

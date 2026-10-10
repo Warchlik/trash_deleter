@@ -21,9 +21,28 @@ func main() {
 		log.Fatalf("%s is not a directory", cfg.Root)
 	}
 
-	items, err := scanner.Scan(cfg.Root, cfg.Patterns, cfg.IgnoreDirs)
+	opts := cleaner.Options{DryRun: cfg.DryRun, Trash: cfg.Trash}
+
+	past, future := "Deleted", "Would delete"
+	if cfg.Trash {
+		past, future = "Trashed", "Would trash"
+	}
+	verb := past
+	if cfg.DryRun {
+		verb = future
+	}
+
+	items, err := scanner.Scan(cfg.Root, cfg.Patterns, cfg.IgnoreDirs, cfg.MaxDepth)
 	if err != nil {
 		log.Printf("scan warnings:\n%v", err)
+	}
+
+	var dirs []string
+	if cfg.EmptyDirs {
+		dirs, err = scanner.EmptyDirs(cfg.Root, cfg.IgnoreDirs, cfg.MaxDepth, items)
+		if err != nil {
+			log.Printf("empty-dirs warnings:\n%v", err)
+		}
 	}
 
 	if cfg.DryRun {
@@ -32,35 +51,21 @@ func main() {
 		}
 	}
 
-	files := cleaner.Remove(items, cfg.DryRun)
-	report(cfg, files, "")
+	files := cleaner.Remove(items, opts)
+	report(cfg, past, files, "")
 
 	failed := files.Failed
-	verb := "Deleted"
-	if cfg.DryRun {
-		verb = "Would delete"
-	}
 	fmt.Printf("%s: %d files, %d B freed, %d failed\n", verb, files.Deleted, files.Freed, files.Failed)
 
 	if cfg.EmptyDirs {
-		var gone []scanner.Candidate
-		if cfg.DryRun {
-			gone = items
-		}
-
-		dirs, err := scanner.EmptyDirs(cfg.Root, cfg.IgnoreDirs, gone)
-		if err != nil {
-			log.Printf("empty-dirs warnings:\n%v", err)
-		}
-
 		if cfg.DryRun {
 			for _, d := range dirs {
 				fmt.Printf("[dry-run] %s%c (empty dir)\n", d, os.PathSeparator)
 			}
 		}
 
-		dres := cleaner.RemoveDirs(dirs, cfg.DryRun)
-		report(cfg, dres, string(os.PathSeparator))
+		dres := cleaner.RemoveDirs(dirs, opts)
+		report(cfg, past, dres, string(os.PathSeparator))
 
 		failed += dres.Failed
 		fmt.Printf("%s: %d empty dirs, %d failed\n", verb, dres.Deleted, dres.Failed)
@@ -71,10 +76,10 @@ func main() {
 	}
 }
 
-func report(cfg config.Config, res cleaner.Result, suffix string) {
+func report(cfg config.Config, past string, res cleaner.Result, suffix string) {
 	if cfg.Verbose && !cfg.DryRun {
 		for _, p := range res.Removed {
-			fmt.Printf("deleted %s%s\n", p, suffix)
+			fmt.Printf("%s %s%s\n", past, p, suffix)
 		}
 	}
 

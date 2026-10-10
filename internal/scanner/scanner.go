@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
 type Candidate struct {
@@ -13,7 +14,7 @@ type Candidate struct {
 	Size int64
 }
 
-func Scan(root string, patterns, ignoreDirs []string) ([]Candidate, error) {
+func Scan(root string, patterns, ignoreDirs []string, maxDepth int) ([]Candidate, error) {
 	var (
 		found []Candidate
 		errs  []error
@@ -29,7 +30,13 @@ func Scan(root string, patterns, ignoreDirs []string) ([]Candidate, error) {
 		}
 
 		if d.IsDir() {
-			if path != root && slices.Contains(ignoreDirs, d.Name()) {
+			if path == root {
+				return nil
+			}
+			if slices.Contains(ignoreDirs, d.Name()) {
+				return filepath.SkipDir
+			}
+			if maxDepth > 0 && depthOf(root, path) >= maxDepth {
 				return filepath.SkipDir
 			}
 			return nil
@@ -56,6 +63,15 @@ func Scan(root string, patterns, ignoreDirs []string) ([]Candidate, error) {
 	return found, errors.Join(errs...)
 }
 
+func depthOf(root, path string) int {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return 0
+	}
+
+	return strings.Count(rel, string(filepath.Separator)) + 1
+}
+
 func isTrash(name string, patterns []string) bool {
 	for _, p := range patterns {
 		ok, err := filepath.Match(p, name)
@@ -67,11 +83,7 @@ func isTrash(name string, patterns []string) bool {
 	return false
 }
 
-// EmptyDirs returns directories under root (root itself excluded) that are
-// empty, or would be empty once the files in removed are gone. Directories in
-// ignoreDirs are never entered or returned. Children come before their parents,
-// so the result can be removed in order with os.Remove.
-func EmptyDirs(root string, ignoreDirs []string, removed []Candidate) ([]string, error) {
+func EmptyDirs(root string, ignoreDirs []string, maxDepth int, removed []Candidate) ([]string, error) {
 	gone := make(map[string]struct{}, len(removed))
 	for _, c := range removed {
 		gone[c.Path] = struct{}{}
@@ -80,15 +92,17 @@ func EmptyDirs(root string, ignoreDirs []string, removed []Candidate) ([]string,
 	var (
 		dirs []string
 		errs []error
-		walk func(dir string) bool
+		walk func(dir string, depth int) bool
 	)
 
-	walk = func(dir string) bool {
+	walk = func(dir string, depth int) bool {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			errs = append(errs, err)
 			return false
 		}
+
+		canEnter := maxDepth == 0 || depth+1 <= maxDepth
 
 		empty := true
 		for _, e := range entries {
@@ -96,7 +110,7 @@ func EmptyDirs(root string, ignoreDirs []string, removed []Candidate) ([]string,
 			if _, ok := gone[p]; ok {
 				continue
 			}
-			if e.IsDir() && !slices.Contains(ignoreDirs, e.Name()) && walk(p) {
+			if canEnter && e.IsDir() && !slices.Contains(ignoreDirs, e.Name()) && walk(p, depth+1) {
 				dirs = append(dirs, p)
 				continue
 			}
@@ -106,7 +120,7 @@ func EmptyDirs(root string, ignoreDirs []string, removed []Candidate) ([]string,
 		return empty
 	}
 
-	walk(root)
+	walk(root, 0)
 
 	return dirs, errors.Join(errs...)
 }
